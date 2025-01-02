@@ -53,6 +53,8 @@ func main() {
 }
 
 func runTasks(ctx context.Context, cancel context.CancelFunc, config AppConfig) {
+	audiostream := capture.NewAudioStream()
+
 	tasks := []struct {
 		Name string
 		Task func(context.Context) error
@@ -63,8 +65,11 @@ func runTasks(ctx context.Context, cancel context.CancelFunc, config AppConfig) 
 		// {"Audio Rendering", func(ctx context.Context) error {
 		// 	return render.Render(config.TempFile, ctx)
 		// }},
-		{"Audio Capture", func(ctx context.Context) error {
-			return capture.Capture(config.CaptureFile, ctx, config.CaptureDevice)
+		{"Audio Capture Stream", func(ctx context.Context) error {
+			return capture.CaptureWithStream(audiostream, config.CaptureDevice, ctx)
+		}},
+		{"Audio Capture File", func(ctx context.Context) error {
+			return capture.CaptureToFile(config.CaptureDevice, config.CaptureFile, ctx)
 		}},
 	}
 
@@ -85,6 +90,26 @@ func runTasks(ctx context.Context, cancel context.CancelFunc, config AppConfig) 
 
 	wg.Wait()
 }
+
+// func writeToFileFromStream(stream *capture.AudioStream, filename string) error {
+// 	outputFile, err := os.Create(filename)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to create output file: %w", err)
+// 	}
+// 	defer outputFile.Close()
+
+// 	// Read and parse the `.wav` file
+// 	err = wave.WriteFrames(samples, waveFmt, filename)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to read file: %w", err)
+// 	}
+// 	slog.Debug("Audio capture successful", slog.String("file", filename))
+// // Read and parse the `.wav` file
+// 	err = wave.WriteFrames(samples, waveFmt, filename)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to read file: %w", err)
+// 	}
+// }
 
 func setupSignalHandling() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())

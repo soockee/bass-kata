@@ -1,24 +1,15 @@
-package audio
+package capture
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"runtime"
 
-	"github.com/DylanMeeus/GoAudio/wave"
 	"github.com/go-ole/go-ole"
 	"github.com/moutend/go-wca/pkg/wca"
 	"github.com/soockee/bass-kata/devices"
 	"golang.org/x/sys/windows"
 )
-
-type AudioClientOpt struct {
-	DeviceName string
-	WaveFmt    wave.WaveFmt
-	Wfx        *wca.WAVEFORMATEX
-	Ctx        context.Context
-}
 
 func SetupAudioClient(deviceName string) (*wca.IAudioClient, error) {
 	// TODO: Is LockOSThread necessary?
