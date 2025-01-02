@@ -1,10 +1,8 @@
-package main
+package audio
 
 import (
 	"fmt"
 	"strings"
-
-	"github.com/moutend/go-wca/pkg/wca"
 )
 
 type FilenameFlag struct {
@@ -22,9 +20,4 @@ func (f *FilenameFlag) Set(value string) (err error) {
 
 func (f *FilenameFlag) String() string {
 	return f.Value
-}
-
-type Device struct {
-	name   wca.PROPVARIANT
-	device *wca.IMMDevice
 }
