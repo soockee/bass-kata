@@ -11,26 +11,30 @@ type Device struct {
 	Device *wca.IMMDevice
 }
 
+type DeviceType uint32
+
+type DeviceState uint32
+
 const (
 	// EDataFlow enum
-	eRender              uint32 = 0
-	eCapture             uint32 = 1
-	eAll                 uint32 = 2
-	EDataFlow_enum_count uint32 = 3
+	ERender              DeviceType = 0
+	ECapture             DeviceType = 1
+	EAll                 DeviceType = 2
+	EDataFlow_enum_count DeviceType = 3
 	// DeviceState enum
-	DEVICE_STATE_ACTIVE     uint32 = 0x00000001
-	DEVICE_STATE_DISABLED   uint32 = 0x00000002
-	DEVICE_STATE_NOTPRESENT uint32 = 0x00000004
-	DEVICE_STATE_UNPLUGGED  uint32 = 0x00000008
-	DEVICE_STATEMASK_ALL    uint32 = 0x0000000f
+	DEVICE_STATE_ACTIVE     DeviceState = 0x00000001
+	DEVICE_STATE_DISABLED   DeviceState = 0x00000002
+	DEVICE_STATE_NOTPRESENT DeviceState = 0x00000004
+	DEVICE_STATE_UNPLUGGED  DeviceState = 0x00000008
+	DEVICE_STATEMASK_ALL    DeviceState = 0x0000000f
 )
 
 // ListDevies lists all audio devices, they need to be released after use
-func ListDevices(mmde *wca.IMMDeviceEnumerator) []*Device {
+func ListDevices(mmde *wca.IMMDeviceEnumerator, deviceType DeviceType, deviceState DeviceState) []*Device {
 	// Enumerate audio endpoints
 	var dc *wca.IMMDeviceCollection
 	var err error
-	mmde.EnumAudioEndpoints(eCapture, DEVICE_STATEMASK_ALL, &dc)
+	mmde.EnumAudioEndpoints(uint32(deviceType), uint32(deviceState), &dc)
 	defer dc.Release()
 
 	var count uint32
@@ -57,8 +61,8 @@ func ListDevices(mmde *wca.IMMDeviceEnumerator) []*Device {
 	return devices
 }
 
-func FindDeviceByName(mmde *wca.IMMDeviceEnumerator, deviceName string) (*Device, error) {
-	devices := ListDevices(mmde)
+func FindDeviceByName(mmde *wca.IMMDeviceEnumerator, deviceName string, deviceType DeviceType, deviceState DeviceState) (*Device, error) {
+	devices := ListDevices(mmde, deviceType, deviceState)
 	// print all devices
 
 	var d *Device

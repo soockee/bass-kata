@@ -11,7 +11,6 @@ import (
 	"github.com/DylanMeeus/GoAudio/wave"
 	"github.com/go-ole/go-ole"
 	"github.com/soockee/bass-kata/audio"
-	"github.com/soockee/bass-kata/capture"
 
 	"github.com/moutend/go-wca/pkg/wca"
 	"golang.org/x/sys/windows"
@@ -38,9 +37,8 @@ func Render(filename string, ctx context.Context) error {
 	return nil
 }
 
-func RenderFromStream(stream capture.AudioStream, ctx context.Context) error {
-	// Render the audio in shared timer-driven mode
-	if err := renderSharedTimerDrivenStream(stream, ctx); err != nil {
+func RenderFromStream(stream *audio.AudioStream, op audio.AudioClientOpt) error {
+	if err := renderSharedTimerDrivenStream(stream, op); err != nil {
 		return fmt.Errorf("rendering failed: %w", err)
 	}
 
@@ -48,7 +46,7 @@ func RenderFromStream(stream capture.AudioStream, ctx context.Context) error {
 	return nil
 }
 
-func renderSharedTimerDrivenStream(stream audio.AudioStream, op audio.AudioClientOpt) (err error) {
+func renderSharedTimerDrivenStream(stream *audio.AudioStream, op audio.AudioClientOpt) (err error) {
 	ac, err := audio.SetupAudioClient(op.DeviceName)
 	if err != nil {
 		return fmt.Errorf("failed to setup audio client: %w", err)
@@ -56,19 +54,32 @@ func renderSharedTimerDrivenStream(stream audio.AudioStream, op audio.AudioClien
 	defer ac.Release()
 
 	// Set up audio format
-	var wfx *wca.WAVEFORMATEX
-	if err = ac.GetMixFormat(&wfx); err != nil {
-		return
+	wfx, err := audio.GetDeviceWfx(ac)
+	if err != nil {
+		return fmt.Errorf("failed to get device wave format: %w", err)
 	}
 	defer ole.CoTaskMemFree(uintptr(unsafe.Pointer(wfx)))
 
-	wfx.WFormatTag = 1
-	wfx.NSamplesPerSec = uint32(op.WaveFmt.SampleRate)
-	wfx.WBitsPerSample = uint16(op.WaveFmt.BitsPerSample)
-	wfx.NChannels = uint16(op.WaveFmt.NumChannels)
-	wfx.NBlockAlign = uint16(op.WaveFmt.BlockAlign)
-	wfx.NAvgBytesPerSec = uint32(op.WaveFmt.ByteRate)
-	wfx.CbSize = 0
+	<-stream.Ready()
+
+	// wfx.NSamplesPerSec = uint32(stream.Fmt.SampleRate)
+	// wfx.WBitsPerSample = uint16(stream.Fmt.BitsPerSample)
+	// wfx.NChannels = uint16(stream.Fmt.NumChannels)
+	// wfx.NBlockAlign = uint16(stream.Fmt.BlockAlign)
+	// wfx.NAvgBytesPerSec = uint32(stream.Fmt.ByteRate)
+
+	var resampler *audio.Resampler
+	if !audio.CompareWaveFmtWfx(stream.Fmt, wfx) {
+		slog.Info("WaveFmt and Wfx mismatch", slog.Any("WaveFmt", stream.Fmt), slog.Any("Wfx", wfx))
+		resampler, err = audio.NewResampler(int(wfx.NChannels), stream.Fmt.SampleRate, int(wfx.NSamplesPerSec))
+		if err != nil {
+			return err
+		}
+	}
+
+	if resampler != nil {
+		slog.Info("Resampling audio", slog.Int("From", resampler.FromRate), slog.Int("To", resampler.ToRate))
+	}
 
 	// Display audio format info
 	slog.Info("--------")
@@ -81,18 +92,18 @@ func renderSharedTimerDrivenStream(stream audio.AudioStream, op audio.AudioClien
 	// Configure buffer size and latency
 	var defaultPeriod, minimumPeriod wca.REFERENCE_TIME
 	if err = ac.GetDevicePeriod(&defaultPeriod, &minimumPeriod); err != nil {
-		return
+		return err
 	}
 	latency := time.Duration(int(minimumPeriod) * 100)
 
 	// Initialize audio client in shared mode
 	if err = ac.Initialize(wca.AUDCLNT_SHAREMODE_SHARED, 0, minimumPeriod, 0, wfx, nil); err != nil {
-		return
+		return err
 	}
 
 	var arc *wca.IAudioRenderClient
 	if err = ac.GetService(wca.IID_IAudioRenderClient, &arc); err != nil {
-		return
+		return err
 	}
 	defer arc.Release()
 
@@ -106,31 +117,46 @@ func renderSharedTimerDrivenStream(stream audio.AudioStream, op audio.AudioClien
 
 	// Rendering loop
 	var (
-		offset          int
-		isPlaying       = true
 		bufferFrameSize uint32
 		data            *byte
 		padding         uint32
+		isRendering     = true
+		residual        []byte // Stores leftover data from previous iteration
+		offset          int
+		raw             []byte
 	)
 
 	if err := ac.GetBufferSize(&bufferFrameSize); err != nil {
 		return fmt.Errorf("failed to get buffer size: %w", err)
 	}
 
-	for isPlaying {
+	for isRendering {
 		select {
 		case <-op.Ctx.Done():
 			slog.Info("Rendering cancelled")
-			isPlaying = false
-			continue
+			isRendering = false
+		case <-stream.Done():
+			slog.Info("AudioStream closed")
+			isRendering = false
 		default:
+			// Read data from the stream
+			streamData := stream.Read()
+
+			// Combine residual data with new stream data
+			raw = append(residual, streamData...)
+
+			if len(streamData) == 0 {
+				continue
+			}
+
 			// Check the buffer availability
 			if err := ac.GetCurrentPadding(&padding); err != nil {
 				slog.Error("Failed to get current padding", slog.Any("error", err))
 				continue
 			}
 			availableFrameSize := bufferFrameSize - padding
-			if availableFrameSize == 0 {
+			lim := int(availableFrameSize) * int(wfx.NBlockAlign)
+			if availableFrameSize == 0 || len(streamData) < lim {
 				// Use a non-blocking wait
 				select {
 				case <-op.Ctx.Done():
@@ -140,6 +166,19 @@ func renderSharedTimerDrivenStream(stream audio.AudioStream, op audio.AudioClien
 					continue
 				}
 			}
+
+			// Determine the amount of data to write
+			// writeSize := int(availableFrameSize) * int(wfx.NBlockAlign)
+			// if writeSize > len(streamData) {
+			// 	writeSize = len(streamData)
+			// }
+
+			// // Get render buffer
+			// if err := arc.GetBuffer(availableFrameSize, &data); err != nil {
+			// 	slog.Error("Failed to get render buffer", slog.Any("error", err))
+			// 	continue
+			// }
+
 			// Get render buffer
 			if err := arc.GetBuffer(availableFrameSize, &data); err != nil {
 				slog.Error("Failed to get render buffer", slog.Any("error", err))
@@ -148,13 +187,7 @@ func renderSharedTimerDrivenStream(stream audio.AudioStream, op audio.AudioClien
 
 			// Copy audio data to render buffer
 			start := unsafe.Pointer(data)
-			lim := int(availableFrameSize) * int(wfx.NBlockAlign)
-			raw := stream.Read()
-			// TODO:
-			if remaining < lim {
-				lim = remaining
-			}
-			for i := 0; i < lim; i++ {
+			for i := 0; i < lim && offset+i < len(raw); i++ {
 				*(*byte)(unsafe.Pointer(uintptr(start) + uintptr(i))) = raw[offset+i]
 			}
 			offset += lim
@@ -165,14 +198,8 @@ func renderSharedTimerDrivenStream(stream audio.AudioStream, op audio.AudioClien
 				return err
 			}
 
-			// Check context again for cancellation
-			select {
-			case <-ctx.Done():
-				slog.Info("Rendering cancelled during buffer release")
-				return ctx.Err()
-			default:
-				// slog.Debug("Rendering audio", slog.Any("offset", offset))
-			}
+			// Save leftover data for next iteration
+			// residual = streamData[writeSize:]
 		}
 	}
 	return nil

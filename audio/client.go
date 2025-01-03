@@ -42,7 +42,7 @@ func SetupAudioClient(deviceName string) (*wca.IAudioClient, error) {
 	defer mmde.Release()
 
 	// Find the desired device by name
-	device, err := devices.FindDeviceByName(mmde, deviceName)
+	device, err := devices.FindDeviceByName(mmde, deviceName, devices.EAll, devices.DEVICE_STATE_ACTIVE)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find device by name: %w", err)
 	}
@@ -53,4 +53,18 @@ func SetupAudioClient(deviceName string) (*wca.IAudioClient, error) {
 		return nil, fmt.Errorf("failed to activate audio client: %w", err)
 	}
 	return ac, nil
+}
+
+func GetDeviceWfx(ac *wca.IAudioClient) (*wca.WAVEFORMATEX, error) {
+	var wfx *wca.WAVEFORMATEX
+	if err := ac.GetMixFormat(&wfx); err != nil {
+		return wfx, fmt.Errorf("failed to get mix format: %w", err)
+	}
+
+	wfx.WFormatTag = 1
+	wfx.NBlockAlign = (wfx.WBitsPerSample / 8) * wfx.NChannels
+	wfx.NAvgBytesPerSec = wfx.NSamplesPerSec * uint32(wfx.NBlockAlign)
+	wfx.CbSize = 0
+
+	return wfx, nil
 }

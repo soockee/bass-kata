@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/DylanMeeus/GoAudio/wave"
+	"github.com/go-ole/go-ole"
 	"github.com/soockee/bass-kata/audio"
 
 	"github.com/moutend/go-wca/pkg/wca"
@@ -28,10 +29,11 @@ func CaptureToFile(deviceName string, filename string, ctx context.Context) erro
 	}
 	defer ac.Release()
 
-	wfx, err := GetDeviceWfx(ac)
+	wfx, err := audio.GetDeviceWfx(ac)
 	if err != nil {
 		return fmt.Errorf("failed to get device wave format: %w", err)
 	}
+	defer ole.CoTaskMemFree(uintptr(unsafe.Pointer(wfx)))
 
 	waveFmt := wave.NewWaveFmt(int(wfx.WFormatTag), int(wfx.NChannels), int(wfx.NSamplesPerSec), int(wfx.WBitsPerSample), nil)
 
@@ -42,14 +44,23 @@ func CaptureToFile(deviceName string, filename string, ctx context.Context) erro
 		Ctx:        ctx,
 	}
 
+	stream := audio.NewAudioStream()
+	stream.SetFmt(op.WaveFmt)
+	<-stream.Ready()
+
 	// Perform the capture operation
-	samples, err := captureSharedTimerDriven(nil, ac, op)
+	err = captureSharedTimerDriven(stream, ac, op)
 	if err != nil {
 		return fmt.Errorf("audio capture failed: %w", err)
 	}
+	<-stream.Done()
+
+	data := stream.Read()
+
+	frames := audio.TransfromRawData(op.WaveFmt, data, audio.MonoRight)
 
 	// Read and parse the `.wav` file
-	err = wave.WriteFrames(samples, waveFmt, filename)
+	err = wave.WriteFrames(frames, waveFmt, filename)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
@@ -65,49 +76,35 @@ func CaptureWithStream(stream *audio.AudioStream, deviceName string, ctx context
 	}
 	defer ac.Release()
 
-	wfx, err := GetDeviceWfx(ac)
+	wfx, err := audio.GetDeviceWfx(ac)
 	if err != nil {
 		return fmt.Errorf("failed to get device wave format: %w", err)
 	}
+	defer ole.CoTaskMemFree(uintptr(unsafe.Pointer(wfx)))
 
 	op := &audio.AudioClientOpt{
 		DeviceName: deviceName,
 		Wfx:        wfx,
-		WaveFmt:    wave.NewWaveFmt(1, 2, 44100, 16, nil),
+		WaveFmt:    wave.NewWaveFmt(int(wfx.WFormatTag), int(wfx.NChannels), int(wfx.NSamplesPerSec), int(wfx.WBitsPerSample), nil),
 		Ctx:        ctx,
 	}
 
-	samples, err := captureSharedTimerDriven(stream, ac, op)
+	stream.SetFmt(op.WaveFmt)
+
+	err = captureSharedTimerDriven(stream, ac, op)
 	if err != nil {
 		return err
 	}
 
-	// Process final audio frames if needed (e.g., write to file)
-	_ = samples // Placeholder for additional processing logic
-
 	return nil
 }
 
-func GetDeviceWfx(ac *wca.IAudioClient) (*wca.WAVEFORMATEX, error) {
-	var wfx *wca.WAVEFORMATEX
-	if err := ac.GetMixFormat(&wfx); err != nil {
-		return wfx, fmt.Errorf("failed to get mix format: %w", err)
-	}
-
-	wfx.WFormatTag = 1
-	wfx.NBlockAlign = (wfx.WBitsPerSample / 8) * wfx.NChannels
-	wfx.NAvgBytesPerSec = wfx.NSamplesPerSec * uint32(wfx.NBlockAlign)
-	wfx.CbSize = 0
-
-	return wfx, nil
-}
-
-func captureSharedTimerDriven(stream *audio.AudioStream, ac *wca.IAudioClient, op *audio.AudioClientOpt) ([]wave.Frame, error) {
+func captureSharedTimerDriven(stream *audio.AudioStream, ac *wca.IAudioClient, op *audio.AudioClientOpt) error {
 
 	// Configure buffer size and latency
 	var defaultPeriod, minimumPeriod wca.REFERENCE_TIME
 	if err := ac.GetDevicePeriod(&defaultPeriod, &minimumPeriod); err != nil {
-		return nil, fmt.Errorf("failed to get device period: %w", err)
+		return fmt.Errorf("failed to get device period: %w", err)
 	}
 
 	// Display audio format info
@@ -122,25 +119,25 @@ func captureSharedTimerDriven(stream *audio.AudioStream, ac *wca.IAudioClient, o
 
 	// Initialize audio client in shared mode
 	if err := ac.Initialize(wca.AUDCLNT_SHAREMODE_SHARED, 0, minimumPeriod, 0, op.Wfx, nil); err != nil {
-		return nil, fmt.Errorf("failed to initialize audio client: %w", err)
+		return fmt.Errorf("failed to initialize audio client: %w", err)
 	}
 
 	// Start audio capture
 	acc, err := startCapture(ac)
 	if err != nil {
-		return nil, fmt.Errorf("failed to start audio capture: %w", err)
+		return fmt.Errorf("failed to start audio capture: %w", err)
 	}
 	defer acc.Release()
 
 	// Capture loop
-	frames, err := captureLoop(op.Ctx, acc, op.WaveFmt, latency)
+	err = captureLoop(stream, acc, latency, op)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to capture audio: %w", err)
+		return fmt.Errorf("failed to capture audio: %w", err)
 	}
 
 	slog.Debug("Audio capture completed")
-	return frames, nil
+	return nil
 }
 
 func startCapture(ac *wca.IAudioClient) (*wca.IAudioCaptureClient, error) {
@@ -158,14 +155,12 @@ func startCapture(ac *wca.IAudioClient) (*wca.IAudioCaptureClient, error) {
 	return acc, nil
 }
 
-func captureLoop(ctx context.Context, acc *wca.IAudioCaptureClient, waveFmt wave.WaveFmt, latency time.Duration) ([]wave.Frame, error) {
+func captureLoop(stream *audio.AudioStream, acc *wca.IAudioCaptureClient, latency time.Duration, op *audio.AudioClientOpt) error {
 	var (
 		isCapturing  = true
 		framesToRead uint32
 		data         *byte
 		flags        uint32
-		output       = []byte{}
-		offset       int
 		packetLength uint32
 	)
 
@@ -175,7 +170,7 @@ func captureLoop(ctx context.Context, acc *wca.IAudioCaptureClient, waveFmt wave
 			continue
 		}
 		select {
-		case <-ctx.Done():
+		case <-op.Ctx.Done():
 			slog.Debug("Capture cancelled")
 			isCapturing = false
 			continue
@@ -185,7 +180,7 @@ func captureLoop(ctx context.Context, acc *wca.IAudioCaptureClient, waveFmt wave
 			}
 
 			if err := acc.GetBuffer(&data, &framesToRead, &flags, nil, nil); err != nil {
-				return nil, fmt.Errorf("failed to get buffer: %w", err)
+				return fmt.Errorf("failed to get buffer: %w", err)
 			}
 			if framesToRead == 0 {
 				continue
@@ -205,23 +200,22 @@ func captureLoop(ctx context.Context, acc *wca.IAudioCaptureClient, waveFmt wave
 			}
 
 			start := unsafe.Pointer(data)
-			lim := int(framesToRead) * int(waveFmt.BlockAlign)
+			lim := int(framesToRead) * int(op.WaveFmt.BlockAlign)
 			buf := make([]byte, lim)
 			for n := 0; n < lim; n++ {
 				buf[n] = *(*byte)(unsafe.Pointer(uintptr(start) + uintptr(n)))
 			}
-			offset += lim
-			output = append(output, buf...)
 
 			if err := acc.ReleaseBuffer(framesToRead); err != nil {
-				return nil, fmt.Errorf("failed to release buffer: %w", err)
+				return fmt.Errorf("failed to release buffer: %w", err)
 			}
+
+
+			stream.Write(buf)
 		}
 	}
 
-	f := parseRawData(waveFmt, output, MonoRight)
+	stream.Close()
 
-	//f = audio.ApplyPan(f, audio.CalculateConstantPowerPosition(0.5))
-
-	return f, nil
+	return nil
 }

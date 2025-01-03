@@ -10,14 +10,15 @@ import (
 
 	"github.com/soockee/bass-kata/audio"
 	"github.com/soockee/bass-kata/capture"
+	"github.com/soockee/bass-kata/render"
 )
 
 type AppConfig struct {
-	InputFile       string
-	TempFile        string
-	CaptureFile     string
-	CaptureDuration time.Duration
-	CaptureDevice   string
+	InputFile     string
+	TempFile      string
+	CaptureFile   string
+	CaptureDevice string
+	OutputDevice  string
 }
 
 func main() {
@@ -34,16 +35,17 @@ func main() {
 		TempFile:      "data-test/output.wav",
 		CaptureFile:   "data-test/captured_audio.wav",
 		CaptureDevice: "Analogue 1 + 2 (Focusrite USB Audio)",
+		OutputDevice:  "Speakers (Focusrite USB Audio)",
 		// CaptureDevice: "Microphone (Yeti Stereo Microphone)",
 	}
 
 	ctx, cancel := setupSignalHandling()
 	defer cancel()
 
-	if err := processWavFile(config.InputFile, config.TempFile); err != nil {
-		slog.Error("Error processing WAV file", slog.Any("error", err))
-		os.Exit(1)
-	}
+	// if err := processWavFile(config.InputFile, config.TempFile); err != nil {
+	// 	slog.Error("Error processing WAV file", slog.Any("error", err))
+	// 	os.Exit(1)
+	// }
 
 	runTasks(ctx, cancel, config)
 
@@ -53,7 +55,7 @@ func main() {
 }
 
 func runTasks(ctx context.Context, cancel context.CancelFunc, config AppConfig) {
-	audiostream := capture.NewAudioStream()
+	audiostream := audio.NewAudioStream()
 
 	tasks := []struct {
 		Name string
@@ -68,8 +70,15 @@ func runTasks(ctx context.Context, cancel context.CancelFunc, config AppConfig) 
 		{"Audio Capture Stream", func(ctx context.Context) error {
 			return capture.CaptureWithStream(audiostream, config.CaptureDevice, ctx)
 		}},
-		{"Audio Capture File", func(ctx context.Context) error {
-			return capture.CaptureToFile(config.CaptureDevice, config.CaptureFile, ctx)
+		// {"Audio Capture File", func(ctx context.Context) error {
+		// 	return capture.CaptureToFile(config.CaptureDevice, config.TempFile, ctx)
+		// }},
+		{"Audio Rendering", func(ctx context.Context) error {
+			op := audio.AudioClientOpt{
+				DeviceName: "Speakers (Focusrite USB Audio)",
+				Ctx:        ctx,
+			}
+			return render.RenderFromStream(audiostream, op)
 		}},
 	}
 
@@ -91,7 +100,7 @@ func runTasks(ctx context.Context, cancel context.CancelFunc, config AppConfig) 
 	wg.Wait()
 }
 
-// func writeToFileFromStream(stream *capture.AudioStream, filename string) error {
+// func writeToFileFromStream(stream **capture.AudioStream, filename string) error {
 // 	outputFile, err := os.Create(filename)
 // 	if err != nil {
 // 		return fmt.Errorf("failed to create output file: %w", err)

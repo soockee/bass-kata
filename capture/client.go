@@ -33,7 +33,7 @@ func SetupAudioClient(deviceName string) (*wca.IAudioClient, error) {
 	defer mmde.Release()
 
 	// Find the desired device by name
-	device, err := devices.FindDeviceByName(mmde, deviceName)
+	device, err := devices.FindDeviceByName(mmde, deviceName, devices.ECapture, devices.DEVICE_STATE_ACTIVE)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find device by name: %w", err)
 	}
