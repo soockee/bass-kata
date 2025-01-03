@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"log"
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"sync"
 	"time"
+	
 
 	"github.com/soockee/bass-kata/audio"
 	"github.com/soockee/bass-kata/capture"
@@ -29,6 +32,13 @@ func main() {
 
 	// Capture the start time
 	startTime := time.Now()
+
+	f, err := os.Create("cpu.prof")
+	if err != nil {
+		log.Fatal(err)
+	}
+	pprof.StartCPUProfile(f)
+	defer pprof.StopCPUProfile()
 
 	config := AppConfig{
 		InputFile:     "data-test/burning_alive.wav",

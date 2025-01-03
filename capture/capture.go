@@ -70,7 +70,7 @@ func CaptureToFile(deviceName string, filename string, ctx context.Context) erro
 
 // CaptureWithStream captures audio and exposes it as a stream
 func CaptureWithStream(stream *audio.AudioStream, deviceName string, ctx context.Context) error {
-	ac, err := SetupAudioClient(deviceName)
+	ac, err := audio.SetupAudioClient(deviceName)
 	if err != nil {
 		return fmt.Errorf("failed to setup audio client: %w", err)
 	}
