@@ -121,9 +121,7 @@ func renderSharedTimerDrivenStream(stream *audio.AudioStream, op audio.AudioClie
 		data            *byte
 		padding         uint32
 		isRendering     = true
-		residual        []byte // Stores leftover data from previous iteration
 		offset          int
-		raw             []byte
 	)
 
 	if err := ac.GetBufferSize(&bufferFrameSize); err != nil {
@@ -141,43 +139,20 @@ func renderSharedTimerDrivenStream(stream *audio.AudioStream, op audio.AudioClie
 		default:
 			// Read data from the stream
 			streamData := stream.Read()
-
-			// Combine residual data with new stream data
-			raw = append(residual, streamData...)
-
 			if len(streamData) == 0 {
 				continue
 			}
 
-			// Check the buffer availability
+			// Batch operations to reduce cgo overhead
 			if err := ac.GetCurrentPadding(&padding); err != nil {
 				slog.Error("Failed to get current padding", slog.Any("error", err))
 				continue
 			}
 			availableFrameSize := bufferFrameSize - padding
-			lim := int(availableFrameSize) * int(wfx.NBlockAlign)
-			if availableFrameSize == 0 || len(streamData) < lim {
-				// Use a non-blocking wait
-				select {
-				case <-op.Ctx.Done():
-					slog.Info("Rendering cancelled during latency wait")
-					return op.Ctx.Err()
-				case <-time.After(latency): // Wait for the latency duration
-					continue
-				}
+			if availableFrameSize <= 0 {
+				time.Sleep(latency) // Avoid busy-waiting
+				continue
 			}
-
-			// Determine the amount of data to write
-			// writeSize := int(availableFrameSize) * int(wfx.NBlockAlign)
-			// if writeSize > len(streamData) {
-			// 	writeSize = len(streamData)
-			// }
-
-			// // Get render buffer
-			// if err := arc.GetBuffer(availableFrameSize, &data); err != nil {
-			// 	slog.Error("Failed to get render buffer", slog.Any("error", err))
-			// 	continue
-			// }
 
 			// Get render buffer
 			if err := arc.GetBuffer(availableFrameSize, &data); err != nil {
@@ -185,11 +160,9 @@ func renderSharedTimerDrivenStream(stream *audio.AudioStream, op audio.AudioClie
 				continue
 			}
 
-			// Copy audio data to render buffer
-			start := unsafe.Pointer(data)
-			for i := 0; i < lim && offset+i < len(raw); i++ {
-				*(*byte)(unsafe.Pointer(uintptr(start) + uintptr(i))) = raw[offset+i]
-			}
+			// Optimize buffer copy
+			lim := min(len(streamData), int(availableFrameSize)*int(wfx.NBlockAlign))
+			copyToRenderBuffer(data, streamData[offset:offset+lim])
 			offset += lim
 
 			// Release buffer
@@ -197,12 +170,15 @@ func renderSharedTimerDrivenStream(stream *audio.AudioStream, op audio.AudioClie
 				slog.Error("Failed to release buffer", slog.Any("error", err))
 				return err
 			}
-
-			// Save leftover data for next iteration
-			// residual = streamData[writeSize:]
 		}
 	}
+	time.Sleep(latency)
 	return nil
+}
+
+func copyToRenderBuffer(dst *byte, src []byte) {
+	dstBytes := unsafe.Slice((*byte)(dst), len(src))
+	copy(dstBytes, src)
 }
 
 func renderSharedTimerDriven(ctx context.Context, audio *wave.Wave) (err error) {
@@ -292,6 +268,15 @@ func renderSharedTimerDriven(ctx context.Context, audio *wave.Wave) (err error) 
 	}
 	defer arc.Release()
 
+	var bufferFrameSize uint32
+	if err := ac.GetBufferSize(&bufferFrameSize); err != nil {
+		return fmt.Errorf("failed to get buffer size: %w", err)
+	}
+
+	slog.Info("Allocated buffer size", slog.Any("Latency", latency))
+	slog.Info("Latency: ", slog.Any("Latency", latency))
+	slog.Info("--------")
+
 	// Start audio rendering
 	if err := ac.Start(); err != nil {
 		return fmt.Errorf("failed to start audio client: %w", err)
@@ -302,17 +287,12 @@ func renderSharedTimerDriven(ctx context.Context, audio *wave.Wave) (err error) 
 
 	// Rendering loop
 	var (
-		raw             = audio.RawData
-		offset          int
-		isPlaying       = true
-		bufferFrameSize uint32
-		data            *byte
-		padding         uint32
+		raw       = audio.RawData
+		offset    int
+		isPlaying = true
+		data      *byte
+		padding   uint32
 	)
-
-	if err := ac.GetBufferSize(&bufferFrameSize); err != nil {
-		return fmt.Errorf("failed to get buffer size: %w", err)
-	}
 
 	for isPlaying {
 		select {

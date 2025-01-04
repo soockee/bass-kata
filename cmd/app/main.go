@@ -9,7 +9,6 @@ import (
 	"runtime/pprof"
 	"sync"
 	"time"
-	
 
 	"github.com/soockee/bass-kata/audio"
 	"github.com/soockee/bass-kata/capture"
@@ -38,6 +37,7 @@ func main() {
 		log.Fatal(err)
 	}
 	pprof.StartCPUProfile(f)
+
 	defer pprof.StopCPUProfile()
 
 	config := AppConfig{
@@ -62,6 +62,13 @@ func main() {
 	// Calculate and log the elapsed time
 	elapsedTime := time.Since(startTime)
 	slog.Info("All tasks completed. Exiting.", slog.String("duration", elapsedTime.String()))
+
+	memf, err := os.Create("mem.prof")
+	if err != nil {
+		log.Fatal(err)
+	}
+	pprof.WriteHeapProfile(memf)
+
 }
 
 func runTasks(ctx context.Context, cancel context.CancelFunc, config AppConfig) {

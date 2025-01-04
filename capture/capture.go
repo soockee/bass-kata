@@ -23,7 +23,7 @@ func CaptureToFile(deviceName string, filename string, ctx context.Context) erro
 	}
 	defer outputFile.Close()
 
-	ac, err := SetupAudioClient(deviceName)
+	ac, err := audio.SetupAudioClient(deviceName)
 	if err != nil {
 		return fmt.Errorf("failed to setup audio client: %w", err)
 	}
@@ -164,8 +164,10 @@ func captureLoop(stream *audio.AudioStream, acc *wca.IAudioCaptureClient, latenc
 		packetLength uint32
 	)
 
+	// wait a bit so the stream can be ready
+	time.Sleep(latency * 10)
+
 	for isCapturing {
-		time.Sleep(latency)
 		if err := acc.GetNextPacketSize(&packetLength); err != nil {
 			continue
 		}
@@ -175,6 +177,7 @@ func captureLoop(stream *audio.AudioStream, acc *wca.IAudioCaptureClient, latenc
 			isCapturing = false
 			continue
 		default:
+			time.Sleep(latency / 2)
 			if packetLength == 0 {
 				continue
 			}
@@ -184,19 +187,6 @@ func captureLoop(stream *audio.AudioStream, acc *wca.IAudioCaptureClient, latenc
 			}
 			if framesToRead == 0 {
 				continue
-			}
-
-			// check flags
-			if flags&wca.AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY != 0 {
-				slog.Warn("Data discontinuity detected")
-			}
-
-			if flags&wca.AUDCLNT_BUFFERFLAGS_SILENT != 0 {
-				slog.Warn("Silent frame detected")
-			}
-
-			if flags&wca.AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR != 0 {
-				slog.Warn("Timestamp error detected")
 			}
 
 			start := unsafe.Pointer(data)
@@ -209,7 +199,6 @@ func captureLoop(stream *audio.AudioStream, acc *wca.IAudioCaptureClient, latenc
 			if err := acc.ReleaseBuffer(framesToRead); err != nil {
 				return fmt.Errorf("failed to release buffer: %w", err)
 			}
-
 
 			stream.Write(buf)
 		}
