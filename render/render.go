@@ -29,7 +29,7 @@ func Render(filename string, deviceName string, ctx context.Context) error {
 	}
 
 	// Render the audio in shared timer-driven mode
-	if err := renderTimerDriven(ctx, deviceName, &audio, wca.AUDCLNT_SHAREMODE_EXCLUSIVE); err != nil {
+	if err := renderTimerDriven(ctx, deviceName, &audio, wca.AUDCLNT_SHAREMODE_SHARED); err != nil {
 		return fmt.Errorf("rendering failed: %w", err)
 	}
 
@@ -45,7 +45,7 @@ func RenderFromStream(stream *audio.AudioStream, deviceName string, ctx context.
 	tid := windows.GetCurrentThreadId()
 	slog.Debug("Thread ID", slog.Int("tid", int(tid)), slog.String("function", "CaptureWithStream"))
 
-	if err := renderTimerDrivenStream(stream, deviceName, ctx, wca.AUDCLNT_SHAREMODE_EXCLUSIVE); err != nil {
+	if err := renderTimerDrivenStream(stream, deviceName, ctx, wca.AUDCLNT_SHAREMODE_SHARED); err != nil {
 		return fmt.Errorf("rendering failed: %w", err)
 	}
 
@@ -67,17 +67,54 @@ func renderTimerDrivenStream(stream *audio.AudioStream, deviceName string, ctx c
 	defer ac.Release()
 
 	var wfx *wca.WAVEFORMATEX
+
+	// const bitsPerSample = 32
+	// const channelCount = 2
+	// const nBlockAlign = channelCount * bitsPerSample / 8
+	// const sampleRate = 48000
+	// wfx = &wca.WAVEFORMATEX{
+	// 	WFormatTag:      uint16(audio.WAVE_FORMAT_EXTENSIBLE),
+	// 	NChannels:       uint16(2),
+	// 	NSamplesPerSec:  uint32(sampleRate),
+	// 	NAvgBytesPerSec: uint32(sampleRate * nBlockAlign),
+	// 	NBlockAlign:     uint16(nBlockAlign),
+	// 	WBitsPerSample:  uint16(bitsPerSample),
+	// 	CbSize:          uint16(0x16),
+	// }
+
+	// Mix format" wfx="&{WFormatTag:65534 NChannels:2 NSamplesPerSec:48000 NAvgBytesPerSec:384000 NBlockAlign:8 WBitsPerSample:32 CbSize:22}"
 	if err := ac.GetMixFormat(&wfx); err != nil {
 		return fmt.Errorf("failed to get mix format: %w", err)
 	}
+	slog.Debug("Mix format", slog.Any("wfx", wfx))
+
 	defer ole.CoTaskMemFree(uintptr(unsafe.Pointer(wfx)))
 
-	wfx.WFormatTag = 1
-	wfx.NChannels = uint16(stream.Fmt.NumChannels)
-	wfx.NSamplesPerSec = uint32(stream.Fmt.SampleRate)
-	wfx.NBlockAlign = (wfx.WBitsPerSample / 8) * wfx.NChannels
-	wfx.NAvgBytesPerSec = wfx.NSamplesPerSec * uint32(wfx.NBlockAlign)
-	wfx.CbSize = 0
+	// Set the audio client properties
+	// get the bytes of the struct
+
+	props := wca.AudioClientProperties{
+		CbSize:                uint32(unsafe.Sizeof(wca.AudioClientProperties{})),
+		BIsOffload:            0,
+		AUDIO_STREAM_CATEGORY: wca.AudioCategory_Other,
+		AUDCLNT_STREAMOPTIONS: wca.AUDCLNT_STREAMOPTIONS_MATCH_FORMAT,
+	}
+
+	if err := ac.SetClientProperties(&props); err != nil {
+		return fmt.Errorf("failed to set client properties: %w", err)
+	}
+
+	// wfx.WFormatTag = 1
+	// wfx.NBlockAlign = (wfx.WBitsPerSample / 8) * wfx.NChannels
+	// wfx.NAvgBytesPerSec = wfx.NSamplesPerSec * uint32(wfx.NBlockAlign)
+	// wfx.CbSize = 0x16
+
+	closestMatch := (&wca.WAVEFORMATEX{})
+	if err := ac.IsFormatSupported(mode, wfx, &closestMatch); err != nil {
+		return fmt.Errorf("failed to check if format is supported: %w", err)
+	}
+
+	slog.Debug("Closest match", slog.Any("closestMatch", closestMatch))
 
 	<-stream.Ready()
 
@@ -99,31 +136,28 @@ func renderTimerDrivenStream(stream *audio.AudioStream, deviceName string, ctx c
 	}
 
 	// Display audio format info
-	slog.Info("--------")
-	slog.Info("Render")
-	slog.Info("Format", slog.Any("PCM_bit_signed_integer", wfx.WBitsPerSample))
-	slog.Info("Rate", slog.Any("Hz", wfx.NSamplesPerSec))
-	slog.Info("Channels", slog.Any("Channels", wfx.NChannels))
-	slog.Info("--------")
+	slog.Info("Render", slog.Any("WFormatTag", wfx.WFormatTag), slog.Any("WBitsPerSample", wfx.WBitsPerSample), slog.Any("Hz", wfx.NSamplesPerSec), slog.Any("Channels", wfx.NChannels))
 
-	var defaultPeriod wca.REFERENCE_TIME
-	var minimumPeriod wca.REFERENCE_TIME
-	var latency time.Duration
-	if err := ac.GetDevicePeriod(&defaultPeriod, &minimumPeriod); err != nil {
-		return err
-	}
-	latency = time.Duration(int(minimumPeriod) * 100)
-
-	// Initialize audio client
-	if err := ac.Initialize(mode, 0, minimumPeriod, 0, wfx, nil); err != nil {
+	var defaultPeriodInFrames, fundamentalPeriodInFrames, minPeriodInFrames, maxPeriodInFrames uint32
+	if err = ac.GetSharedModeEnginePeriod(wfx, &defaultPeriodInFrames, &fundamentalPeriodInFrames, &minPeriodInFrames, &maxPeriodInFrames); err != nil {
 		return err
 	}
 
-	var bufferFrameSize uint32
-	if err := ac.GetBufferSize(&bufferFrameSize); err != nil {
+	slog.Info("Default period in frames: ", defaultPeriodInFrames)
+	slog.Info("Fundamental period in frames: ", fundamentalPeriodInFrames)
+	slog.Info("Min period in frames: ", minPeriodInFrames)
+	slog.Info("Max period in frames: ", maxPeriodInFrames)
+
+	var latency time.Duration = time.Duration(float64(minPeriodInFrames)/float64(wfx.NSamplesPerSec)*1000) * time.Millisecond
+	if err = ac.InitializeSharedAudioStream(mode, minPeriodInFrames, wfx, nil); err != nil {
 		return err
 	}
-	fmt.Printf("Allocated buffer size: %d\n", bufferFrameSize)
+
+	var bufferFrames uint32
+	if err := ac.GetBufferSize(&bufferFrames); err != nil {
+		return err
+	}
+	fmt.Printf("Allocated buffer size: %d\n", bufferFrames)
 
 	var arc *wca.IAudioRenderClient
 	if err := ac.GetService(wca.IID_IAudioRenderClient, &arc); err != nil {
@@ -157,6 +191,7 @@ func renderTimerDrivenStream(stream *audio.AudioStream, deviceName string, ctx c
 			isRendering = false
 		default:
 			// Read data from the stream
+			// holds length of complete recording so far, but contains only the unread portion of the stream at the given time
 			streamData := stream.Read()
 			if len(streamData) == 0 {
 				continue
@@ -167,25 +202,29 @@ func renderTimerDrivenStream(stream *audio.AudioStream, deviceName string, ctx c
 				slog.Error("Failed to get current padding", slog.Any("error", err))
 				continue
 			}
-			availableFrameSize := bufferFrameSize - padding
-			if availableFrameSize <= 0 {
+			frames := bufferFrames - padding
+			if frames <= 0 {
 				time.Sleep(latency) // Avoid busy-waiting
 				continue
 			}
 
 			// Get render buffer
-			if err := arc.GetBuffer(availableFrameSize, &data); err != nil {
+			if err := arc.GetBuffer(frames, &data); err != nil {
 				slog.Error("Failed to get render buffer", slog.Any("error", err))
 				continue
 			}
 
 			// Optimize buffer copy
-			lim := min(len(streamData), int(availableFrameSize)*int(wfx.NBlockAlign))
+			lim := int(frames) * int(wfx.NBlockAlign)
+			buflen := cap(streamData) - offset
+			if buflen < lim {
+				lim = buflen
+			}
 			copyToRenderBuffer(data, streamData[offset:offset+lim])
 			offset += lim
 
 			// Release buffer
-			if err := arc.ReleaseBuffer(availableFrameSize, 0); err != nil {
+			if err := arc.ReleaseBuffer(frames, 0); err != nil {
 				slog.Error("Failed to release buffer", slog.Any("error", err))
 				return err
 			}
@@ -240,17 +279,33 @@ func renderTimerDriven(ctx context.Context, deviceName string, wavAudio *wave.Wa
 	slog.Info("Channels", slog.Any("Channels", wfx.NChannels))
 	slog.Info("--------")
 
-	// Configure buffer size and latency
-	var defaultPeriod, minimumPeriod wca.REFERENCE_TIME
-	if err := ac.GetDevicePeriod(&defaultPeriod, &minimumPeriod); err != nil {
+	var defaultPeriodInFrames, fundamentalPeriodInFrames, minPeriodInFrames, maxPeriodInFrames uint32
+	if err = ac.GetSharedModeEnginePeriod(wfx, &defaultPeriodInFrames, &fundamentalPeriodInFrames, &minPeriodInFrames, &maxPeriodInFrames); err != nil {
 		return err
 	}
-	latency := time.Duration(int(minimumPeriod) * 100)
 
-	// Initialize audio client in exclusive mode
-	if err := ac.Initialize(mode, 0, minimumPeriod, 0, wfx, nil); err != nil {
+	slog.Info("Default period in frames: ", defaultPeriodInFrames)
+	slog.Info("Fundamental period in frames: ", fundamentalPeriodInFrames)
+	slog.Info("Min period in frames: ", minPeriodInFrames)
+	slog.Info("Max period in frames: ", maxPeriodInFrames)
+
+	var latency time.Duration = time.Duration(float64(minPeriodInFrames)/float64(wfx.NSamplesPerSec)*1000) * time.Millisecond
+	if err = ac.InitializeSharedAudioStream(mode, minPeriodInFrames, wfx, nil); err != nil {
 		return err
 	}
+
+	// // Configure buffer size and latency
+	// var defaultPeriod, minimumPeriod wca.REFERENCE_TIME
+	// if err := ac.GetDevicePeriod(&defaultPeriod, &minimumPeriod); err != nil {
+	// 	return err
+	// }
+	// latency := time.Duration(int(minimumPeriod) * 100)
+
+	// // Initialize audio client in exclusive mode
+	// // flags := uint32(wca.AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM)
+	// if err := ac.Initialize(mode, 0, minimumPeriod, 0, wfx, nil); err != nil {
+	// 	return err
+	// }
 
 	var arc *wca.IAudioRenderClient
 	if err := ac.GetService(wca.IID_IAudioRenderClient, &arc); err != nil {
@@ -258,12 +313,12 @@ func renderTimerDriven(ctx context.Context, deviceName string, wavAudio *wave.Wa
 	}
 	defer arc.Release()
 
-	var bufferFrameSize uint32
-	if err := ac.GetBufferSize(&bufferFrameSize); err != nil {
+	var bufferFrames uint32
+	if err := ac.GetBufferSize(&bufferFrames); err != nil {
 		return fmt.Errorf("failed to get buffer size: %w", err)
 	}
 
-	slog.Info("Allocated buffer size", slog.Any("bufferFrameSize", bufferFrameSize))
+	slog.Info("Allocated buffer size", slog.Any("bufferFrameSize", bufferFrames))
 	slog.Info("Latency: ", slog.Any("Latency", latency))
 	slog.Info("--------")
 
@@ -277,11 +332,11 @@ func renderTimerDriven(ctx context.Context, deviceName string, wavAudio *wave.Wa
 
 	// Rendering loop
 	var (
-		raw       = wavAudio.RawData
-		offset    int
-		isPlaying = true
-		data      *byte
-		padding   uint32
+		raw           = wavAudio.RawData
+		offset        int
+		isPlaying     = true
+		data          *byte
+		paddingFrames uint32
 	)
 
 	for isPlaying {
@@ -295,23 +350,23 @@ func renderTimerDriven(ctx context.Context, deviceName string, wavAudio *wave.Wa
 				isPlaying = false
 				break
 			}
-			if err := ac.GetCurrentPadding(&padding); err != nil {
+			if err := ac.GetCurrentPadding(&paddingFrames); err != nil {
 				slog.Error("Failed to get current padding", slog.Any("error", err))
 				continue
 			}
-			availableFrameSize := bufferFrameSize - padding
-			if availableFrameSize <= 0 {
+			frames := bufferFrames - paddingFrames
+			if frames <= 0 {
 				continue
 			}
 
 			// Get render buffer
-			if err := arc.GetBuffer(availableFrameSize, &data); err != nil {
+			if err := arc.GetBuffer(frames, &data); err != nil {
 				slog.Error("Failed to get render buffer", slog.Any("error", err))
 				continue
 			}
 
 			// Optimize buffer copy
-			lim := int(availableFrameSize) * int(wfx.NBlockAlign)
+			lim := int(frames) * int(wfx.NBlockAlign)
 			remaining := wavAudio.Subchunk2Size - offset
 			if remaining < lim {
 				lim = remaining
@@ -321,7 +376,7 @@ func renderTimerDriven(ctx context.Context, deviceName string, wavAudio *wave.Wa
 			offset += lim
 
 			// Release buffer
-			if err := arc.ReleaseBuffer(availableFrameSize, 0); err != nil {
+			if err := arc.ReleaseBuffer(frames, 0); err != nil {
 				slog.Error("Failed to release buffer", slog.Any("error", err))
 				return err
 			}

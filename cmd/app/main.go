@@ -46,6 +46,7 @@ func main() {
 		CaptureFile:   "data-test/captured_audio.wav",
 		CaptureDevice: "Analogue 1 + 2 (Focusrite USB Audio)",
 		OutputDevice:  "Speakers (Focusrite USB Audio)",
+		// OutputDevice: "Headphones (2- High Definition Audio Device)",
 		// CaptureDevice: "Microphone (Yeti Stereo Microphone)",
 	}
 

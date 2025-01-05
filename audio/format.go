@@ -5,6 +5,11 @@ import (
 	"github.com/moutend/go-wca/pkg/wca"
 )
 
+const (
+	WAVE_FORMAT_EXTENSIBLE = 0xfffe
+	WAVE_FORMAT_PCM        = 0x0001
+)
+
 // Compare compares two wavefmts and returns true if they are equal.
 func CompareWaveFmt(a, b wave.WaveFmt) bool {
 	for i := range a.Subchunk1ID {

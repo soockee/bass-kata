@@ -49,6 +49,7 @@ func CaptureToFile(deviceName string, filename string, ctx context.Context) erro
 		return fmt.Errorf("failed to get mix format: %w", err)
 	}
 	defer ole.CoTaskMemFree(uintptr(unsafe.Pointer(wfx)))
+	slog.Debug("Capture", slog.Any("wfx format", wfx))
 
 	// wfx.WFormatTag = 1
 	// wfx.NBlockAlign = (wfx.WBitsPerSample / 8) * wfx.NChannels
@@ -110,15 +111,24 @@ func CaptureWithStream(stream *audio.AudioStream, deviceName string, ctx context
 	defer ac.Release()
 
 	var wfx *wca.WAVEFORMATEX
+
+	// Mix format" wfx="&{WFormatTag:65534 NChannels:2 NSamplesPerSec:48000 NAvgBytesPerSec:384000 NBlockAlign:8 WBitsPerSample:32 CbSize:22}"
 	if err := ac.GetMixFormat(&wfx); err != nil {
 		return fmt.Errorf("failed to get mix format: %w", err)
 	}
-	defer ole.CoTaskMemFree(uintptr(unsafe.Pointer(wfx)))
+	const bitsPerSample = 32
+	const channelCount = 2
+	const nBlockAlign = channelCount * bitsPerSample / 8
+	const sampleRate = 48000
+	wfx.WFormatTag = audio.WAVE_FORMAT_EXTENSIBLE
+	wfx.NChannels = uint16(2)
+	wfx.NSamplesPerSec = uint32(sampleRate)
+	wfx.NAvgBytesPerSec = uint32(sampleRate * nBlockAlign)
+	wfx.NBlockAlign = uint16(nBlockAlign)
+	wfx.WBitsPerSample = uint16(bitsPerSample)
+	wfx.CbSize = uint16(0x16)
 
-	wfx.WFormatTag = 1
-	wfx.NBlockAlign = (wfx.WBitsPerSample / 8) * wfx.NChannels
-	wfx.NAvgBytesPerSec = wfx.NSamplesPerSec * uint32(wfx.NBlockAlign)
-	wfx.CbSize = 0
+	defer ole.CoTaskMemFree(uintptr(unsafe.Pointer(wfx)))
 
 	op := &audio.AudioClientOpt{
 		DeviceName: deviceName,
@@ -138,7 +148,7 @@ func CaptureWithStream(stream *audio.AudioStream, deviceName string, ctx context
 	return nil
 }
 
-func captureSharedTimerDriven(stream *audio.AudioStream, ac *wca.IAudioClient, op *audio.AudioClientOpt) error {
+func captureSharedTimerDriven(stream *audio.AudioStream, ac *wca.IAudioClient3, op *audio.AudioClientOpt) error {
 
 	// Configure buffer size and latency
 	var defaultPeriod, minimumPeriod wca.REFERENCE_TIME
@@ -154,9 +164,9 @@ func captureSharedTimerDriven(stream *audio.AudioStream, ac *wca.IAudioClient, o
 	slog.Debug("Channels", slog.Any("Channels", op.Wfx.NChannels))
 	slog.Debug("--------")
 
-	latency := time.Duration(int(minimumPeriod) * 100)
+	latency := time.Duration(int(minimumPeriod) * 10)
 
-	// Initialize audio client in shared mode
+	// Initialize audio client in mode
 	if err := ac.Initialize(op.Mode, 0, minimumPeriod, 0, op.Wfx, nil); err != nil {
 		return fmt.Errorf("failed to initialize audio client: %w", err)
 	}
@@ -179,7 +189,7 @@ func captureSharedTimerDriven(stream *audio.AudioStream, ac *wca.IAudioClient, o
 	return nil
 }
 
-func startCapture(ac *wca.IAudioClient) (*wca.IAudioCaptureClient, error) {
+func startCapture(ac *wca.IAudioClient3) (*wca.IAudioCaptureClient, error) {
 	var acc *wca.IAudioCaptureClient
 	if err := ac.GetService(wca.IID_IAudioCaptureClient, &acc); err != nil {
 		return nil, fmt.Errorf("failed to get audio capture client: %w", err)

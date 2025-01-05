@@ -17,7 +17,7 @@ type AudioClientOpt struct {
 	Mode       uint32
 }
 
-func SetupAudioClient(deviceName string) (*wca.IAudioClient, error) {
+func SetupAudioClient(deviceName string) (*wca.IAudioClient3, error) {
 	// Get default capture audio endpoint
 	var mmde *wca.IMMDeviceEnumerator
 	if err := wca.CoCreateInstance(wca.CLSID_MMDeviceEnumerator, 0, wca.CLSCTX_ALL, wca.IID_IMMDeviceEnumerator, &mmde); err != nil {
@@ -32,9 +32,10 @@ func SetupAudioClient(deviceName string) (*wca.IAudioClient, error) {
 	}
 	defer device.Device.Release()
 
-	var ac *wca.IAudioClient
-	if err := device.Device.Activate(wca.IID_IAudioClient, wca.CLSCTX_ALL, nil, &ac); err != nil {
+	var ac *wca.IAudioClient3
+	if err := device.Device.Activate(wca.IID_IAudioClient3, wca.CLSCTX_ALL, nil, &ac); err != nil {
 		return nil, fmt.Errorf("failed to activate audio client: %w", err)
 	}
+
 	return ac, nil
 }

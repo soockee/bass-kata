@@ -64,6 +64,9 @@ func ListDevices(mmde *wca.IMMDeviceEnumerator, deviceType DeviceType, deviceSta
 func FindDeviceByName(mmde *wca.IMMDeviceEnumerator, deviceName string, deviceType DeviceType, deviceState DeviceState) (*Device, error) {
 	devices := ListDevices(mmde, deviceType, deviceState)
 	// print all devices
+	// for _, device := range devices {
+	// 	fmt.Println(device.Name.String())
+	// }
 
 	var d *Device
 	for _, device := range devices {
