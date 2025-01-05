@@ -5,17 +5,32 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"time"
 	"unsafe"
 
 	"github.com/DylanMeeus/GoAudio/wave"
 	"github.com/go-ole/go-ole"
 	"github.com/soockee/bass-kata/audio"
+	"golang.org/x/sys/windows"
 
 	"github.com/moutend/go-wca/pkg/wca"
 )
 
 func CaptureToFile(deviceName string, filename string, ctx context.Context) error {
+	// TODO: Is LockOSThread necessary?
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED)
+	if err != nil {
+		return fmt.Errorf("failed to initialize COM: %w", err)
+	}
+	defer ole.CoUninitialize()
+
+	tid := windows.GetCurrentThreadId()
+	slog.Debug("Thread ID", slog.Int("tid", int(tid)), slog.String("function", "captureSharedTimerDriven"))
+
 	// Prepare the output WAV file
 	outputFile, err := os.Create(filename)
 	if err != nil {
@@ -29,11 +44,16 @@ func CaptureToFile(deviceName string, filename string, ctx context.Context) erro
 	}
 	defer ac.Release()
 
-	wfx, err := audio.GetDeviceWfx(ac)
-	if err != nil {
-		return fmt.Errorf("failed to get device wave format: %w", err)
+	var wfx *wca.WAVEFORMATEX
+	if err := ac.GetMixFormat(&wfx); err != nil {
+		return fmt.Errorf("failed to get mix format: %w", err)
 	}
 	defer ole.CoTaskMemFree(uintptr(unsafe.Pointer(wfx)))
+
+	// wfx.WFormatTag = 1
+	// wfx.NBlockAlign = (wfx.WBitsPerSample / 8) * wfx.NChannels
+	// wfx.NAvgBytesPerSec = wfx.NSamplesPerSec * uint32(wfx.NBlockAlign)
+	// wfx.CbSize = 0
 
 	waveFmt := wave.NewWaveFmt(int(wfx.WFormatTag), int(wfx.NChannels), int(wfx.NSamplesPerSec), int(wfx.WBitsPerSample), nil)
 
@@ -70,23 +90,42 @@ func CaptureToFile(deviceName string, filename string, ctx context.Context) erro
 
 // CaptureWithStream captures audio and exposes it as a stream
 func CaptureWithStream(stream *audio.AudioStream, deviceName string, ctx context.Context) error {
+
+	err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED)
+	if err != nil {
+		return fmt.Errorf("failed to initialize COM: %w", err)
+	}
+	defer ole.CoUninitialize()
+	// TODO: Is LockOSThread necessary?
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	tid := windows.GetCurrentThreadId()
+	slog.Debug("Thread ID", slog.Int("tid", int(tid)), slog.String("function", "CaptureWithStream"))
+
 	ac, err := audio.SetupAudioClient(deviceName)
 	if err != nil {
 		return fmt.Errorf("failed to setup audio client: %w", err)
 	}
 	defer ac.Release()
 
-	wfx, err := audio.GetDeviceWfx(ac)
-	if err != nil {
-		return fmt.Errorf("failed to get device wave format: %w", err)
+	var wfx *wca.WAVEFORMATEX
+	if err := ac.GetMixFormat(&wfx); err != nil {
+		return fmt.Errorf("failed to get mix format: %w", err)
 	}
 	defer ole.CoTaskMemFree(uintptr(unsafe.Pointer(wfx)))
+
+	wfx.WFormatTag = 1
+	wfx.NBlockAlign = (wfx.WBitsPerSample / 8) * wfx.NChannels
+	wfx.NAvgBytesPerSec = wfx.NSamplesPerSec * uint32(wfx.NBlockAlign)
+	wfx.CbSize = 0
 
 	op := &audio.AudioClientOpt{
 		DeviceName: deviceName,
 		Wfx:        wfx,
 		WaveFmt:    wave.NewWaveFmt(int(wfx.WFormatTag), int(wfx.NChannels), int(wfx.NSamplesPerSec), int(wfx.WBitsPerSample), nil),
 		Ctx:        ctx,
+		Mode:       wca.AUDCLNT_SHAREMODE_SHARED,
 	}
 
 	stream.SetFmt(op.WaveFmt)
@@ -118,7 +157,7 @@ func captureSharedTimerDriven(stream *audio.AudioStream, ac *wca.IAudioClient, o
 	latency := time.Duration(int(minimumPeriod) * 100)
 
 	// Initialize audio client in shared mode
-	if err := ac.Initialize(wca.AUDCLNT_SHAREMODE_SHARED, 0, minimumPeriod, 0, op.Wfx, nil); err != nil {
+	if err := ac.Initialize(op.Mode, 0, minimumPeriod, 0, op.Wfx, nil); err != nil {
 		return fmt.Errorf("failed to initialize audio client: %w", err)
 	}
 

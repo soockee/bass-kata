@@ -32,13 +32,13 @@ func main() {
 	// Capture the start time
 	startTime := time.Now()
 
-	f, err := os.Create("cpu.prof")
-	if err != nil {
-		log.Fatal(err)
-	}
-	pprof.StartCPUProfile(f)
+	// f, err := os.Create("cpu.prof")
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	// pprof.StartCPUProfile(f)
 
-	defer pprof.StopCPUProfile()
+	// defer pprof.StopCPUProfile()
 
 	config := AppConfig{
 		InputFile:     "data-test/burning_alive.wav",
@@ -52,10 +52,10 @@ func main() {
 	ctx, cancel := setupSignalHandling()
 	defer cancel()
 
-	// if err := processWavFile(config.InputFile, config.TempFile); err != nil {
-	// 	slog.Error("Error processing WAV file", slog.Any("error", err))
-	// 	os.Exit(1)
-	// }
+	if err := processWavFile(config.InputFile, config.TempFile); err != nil {
+		slog.Error("Error processing WAV file", slog.Any("error", err))
+		os.Exit(1)
+	}
 
 	runTasks(ctx, cancel, config)
 
@@ -82,7 +82,7 @@ func runTasks(ctx context.Context, cancel context.CancelFunc, config AppConfig) 
 		// 	return devices.Devices(ctx)
 		// }},
 		// {"Audio Rendering", func(ctx context.Context) error {
-		// 	return render.Render(config.TempFile, ctx)
+		// 	return render.Render(config.TempFile, config.OutputDevice, ctx)
 		// }},
 		{"Audio Capture Stream", func(ctx context.Context) error {
 			return capture.CaptureWithStream(audiostream, config.CaptureDevice, ctx)
@@ -91,11 +91,7 @@ func runTasks(ctx context.Context, cancel context.CancelFunc, config AppConfig) 
 		// 	return capture.CaptureToFile(config.CaptureDevice, config.TempFile, ctx)
 		// }},
 		{"Audio Rendering", func(ctx context.Context) error {
-			op := audio.AudioClientOpt{
-				DeviceName: "Speakers (Focusrite USB Audio)",
-				Ctx:        ctx,
-			}
-			return render.RenderFromStream(audiostream, op)
+			return render.RenderFromStream(audiostream, config.OutputDevice, ctx)
 		}},
 	}
 
