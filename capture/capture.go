@@ -149,26 +149,19 @@ func CaptureWithStream(stream *audio.AudioStream, deviceName string, ctx context
 }
 
 func captureSharedTimerDriven(stream *audio.AudioStream, ac *wca.IAudioClient3, op *audio.AudioClientOpt) error {
-
-	// Configure buffer size and latency
-	var defaultPeriod, minimumPeriod wca.REFERENCE_TIME
-	if err := ac.GetDevicePeriod(&defaultPeriod, &minimumPeriod); err != nil {
-		return fmt.Errorf("failed to get device period: %w", err)
+	var defaultPeriodInFrames, fundamentalPeriodInFrames, minPeriodInFrames, maxPeriodInFrames uint32
+	if err := ac.GetSharedModeEnginePeriod(op.Wfx, &defaultPeriodInFrames, &fundamentalPeriodInFrames, &minPeriodInFrames, &maxPeriodInFrames); err != nil {
+		return err
 	}
 
-	// Display audio format info
-	slog.Debug("--------")
-	slog.Debug("Capture")
-	slog.Debug("Format", slog.Any("PCM_bit_signed_integer", op.Wfx.WBitsPerSample))
-	slog.Debug("Rate", slog.Any("Hz", op.Wfx.NSamplesPerSec))
-	slog.Debug("Channels", slog.Any("Channels", op.Wfx.NChannels))
-	slog.Debug("--------")
+	slog.Info("Capture", slog.Any("Default period in frames", defaultPeriodInFrames))
+	slog.Info("Capture", slog.Any("Fundamental period in frames: ", fundamentalPeriodInFrames))
+	slog.Info("Capture", slog.Any("Min period in frames: ", minPeriodInFrames))
+	slog.Info("Capture", slog.Any("Max period in frames: ", maxPeriodInFrames))
 
-	latency := time.Duration(int(minimumPeriod) * 10)
-
-	// Initialize audio client in mode
-	if err := ac.Initialize(op.Mode, 0, minimumPeriod, 0, op.Wfx, nil); err != nil {
-		return fmt.Errorf("failed to initialize audio client: %w", err)
+	var latency time.Duration = time.Duration(float64(minPeriodInFrames)/float64(op.Wfx.NSamplesPerSec)*1000) * time.Millisecond
+	if err := ac.InitializeSharedAudioStream(wca.AUDCLNT_SHAREMODE_SHARED, minPeriodInFrames, op.Wfx, nil); err != nil {
+		return err
 	}
 
 	// Start audio capture
@@ -226,7 +219,7 @@ func captureLoop(stream *audio.AudioStream, acc *wca.IAudioCaptureClient, latenc
 			isCapturing = false
 			continue
 		default:
-			time.Sleep(latency / 2)
+			// time.Sleep(latency / 2)
 			if packetLength == 0 {
 				continue
 			}

@@ -32,21 +32,21 @@ func main() {
 	// Capture the start time
 	startTime := time.Now()
 
-	// f, err := os.Create("cpu.prof")
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// pprof.StartCPUProfile(f)
+	f, err := os.Create("cpu.prof")
+	if err != nil {
+		log.Fatal(err)
+	}
+	pprof.StartCPUProfile(f)
 
-	// defer pprof.StopCPUProfile()
+	defer pprof.StopCPUProfile()
 
 	config := AppConfig{
 		InputFile:     "data-test/burning_alive.wav",
 		TempFile:      "data-test/output.wav",
 		CaptureFile:   "data-test/captured_audio.wav",
 		CaptureDevice: "Analogue 1 + 2 (Focusrite USB Audio)",
-		OutputDevice:  "Speakers (Focusrite USB Audio)",
-		// OutputDevice: "Headphones (2- High Definition Audio Device)",
+		// OutputDevice:  "Speakers (Focusrite USB Audio)",
+		OutputDevice: "Headphones (2- High Definition Audio Device)",
 		// CaptureDevice: "Microphone (Yeti Stereo Microphone)",
 	}
 
@@ -82,9 +82,9 @@ func runTasks(ctx context.Context, cancel context.CancelFunc, config AppConfig) 
 		// {"Devices Monitoring", func(ctx context.Context) error {
 		// 	return devices.Devices(ctx)
 		// }},
-		// {"Audio Rendering", func(ctx context.Context) error {
-		// 	return render.Render(config.TempFile, config.OutputDevice, ctx)
-		// }},
+		{"Audio Rendering", func(ctx context.Context) error {
+			return render.Render(config.TempFile, config.OutputDevice, ctx)
+		}},
 		{"Audio Capture Stream", func(ctx context.Context) error {
 			return capture.CaptureWithStream(audiostream, config.CaptureDevice, ctx)
 		}},

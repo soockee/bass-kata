@@ -131,10 +131,10 @@ func renderTimerDrivenStream(stream *audio.AudioStream, deviceName string, ctx c
 		return err
 	}
 
-	slog.Info("Default period in frames: ", defaultPeriodInFrames)
-	slog.Info("Fundamental period in frames: ", fundamentalPeriodInFrames)
-	slog.Info("Min period in frames: ", minPeriodInFrames)
-	slog.Info("Max period in frames: ", maxPeriodInFrames)
+	slog.Info("Render", slog.Any("Default period in frames", defaultPeriodInFrames))
+	slog.Info("Render", slog.Any("Fundamental period in frames: ", fundamentalPeriodInFrames))
+	slog.Info("Render", slog.Any("Min period in frames: ", minPeriodInFrames))
+	slog.Info("Render", slog.Any("Max period in frames: ", maxPeriodInFrames))
 
 	var latency time.Duration = time.Duration(float64(minPeriodInFrames)/float64(wfx.NSamplesPerSec)*1000) * time.Millisecond
 	if err = ac.InitializeSharedAudioStream(mode, minPeriodInFrames, wfx, nil); err != nil {
@@ -218,7 +218,6 @@ func renderTimerDrivenStream(stream *audio.AudioStream, deviceName string, ctx c
 			}
 		}
 	}
-	time.Sleep(latency)
 	return nil
 }
 
