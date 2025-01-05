@@ -56,6 +56,7 @@ func ListDevices(mmde *wca.IMMDeviceEnumerator, deviceType DeviceType, deviceSta
 		if err = ps.GetValue(&wca.PKEY_Device_FriendlyName, &pv); err != nil {
 			return nil
 		}
+
 		devices = append(devices, &Device{Name: pv, Device: device})
 	}
 	return devices
