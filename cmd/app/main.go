@@ -13,6 +13,7 @@ import (
 	"github.com/soockee/bass-kata/audio"
 	"github.com/soockee/bass-kata/capture"
 	"github.com/soockee/bass-kata/render"
+	"github.com/soockee/bass-kata/wasio"
 )
 
 type AppConfig struct {
@@ -39,6 +40,8 @@ func main() {
 	pprof.StartCPUProfile(f)
 
 	defer pprof.StopCPUProfile()
+
+	wasio.Run()
 
 	config := AppConfig{
 		InputFile:     "data-test/burning_alive.wav",

@@ -11,4 +11,7 @@ require (
 	golang.org/x/sys v0.1.0
 )
 
-require github.com/go-audio/riff v1.0.0 // indirect
+require (
+	github.com/JamesDunne/go-asio v0.0.0-20150322061733-6c4b099ca927 // indirect
+	github.com/go-audio/riff v1.0.0 // indirect
+)
