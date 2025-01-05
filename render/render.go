@@ -66,8 +66,6 @@ func renderTimerDrivenStream(stream *audio.AudioStream, deviceName string, ctx c
 	}
 	defer ac.Release()
 
-	var wfx *wca.WAVEFORMATEX
-
 	// const bitsPerSample = 32
 	// const channelCount = 2
 	// const nBlockAlign = channelCount * bitsPerSample / 8
@@ -81,8 +79,7 @@ func renderTimerDrivenStream(stream *audio.AudioStream, deviceName string, ctx c
 	// 	WBitsPerSample:  uint16(bitsPerSample),
 	// 	CbSize:          uint16(0x16),
 	// }
-
-	// Mix format" wfx="&{WFormatTag:65534 NChannels:2 NSamplesPerSec:48000 NAvgBytesPerSec:384000 NBlockAlign:8 WBitsPerSample:32 CbSize:22}"
+	var wfx *wca.WAVEFORMATEX
 	if err := ac.GetMixFormat(&wfx); err != nil {
 		return fmt.Errorf("failed to get mix format: %w", err)
 	}
@@ -104,11 +101,6 @@ func renderTimerDrivenStream(stream *audio.AudioStream, deviceName string, ctx c
 		return fmt.Errorf("failed to set client properties: %w", err)
 	}
 
-	// wfx.WFormatTag = 1
-	// wfx.NBlockAlign = (wfx.WBitsPerSample / 8) * wfx.NChannels
-	// wfx.NAvgBytesPerSec = wfx.NSamplesPerSec * uint32(wfx.NBlockAlign)
-	// wfx.CbSize = 0x16
-
 	closestMatch := (&wca.WAVEFORMATEX{})
 	if err := ac.IsFormatSupported(mode, wfx, &closestMatch); err != nil {
 		return fmt.Errorf("failed to check if format is supported: %w", err)
@@ -117,10 +109,6 @@ func renderTimerDrivenStream(stream *audio.AudioStream, deviceName string, ctx c
 	slog.Debug("Closest match", slog.Any("closestMatch", closestMatch))
 
 	<-stream.Ready()
-
-	// wfx.WBitsPerSample = uint16(stream.Fmt.BitsPerSample)
-	// wfx.NBlockAlign = uint16(stream.Fmt.BlockAlign)
-	// wfx.NAvgBytesPerSec = uint32(stream.Fmt.ByteRate)
 
 	var resampler *audio.Resampler
 	if !audio.CompareWaveFmtWfx(stream.Fmt, wfx) {
