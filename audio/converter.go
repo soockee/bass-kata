@@ -32,7 +32,7 @@ func ConvertWav(inputFile, outputFile string) error {
 	}
 
 	if decoder.SampleRate != 48000 {
-		slog.Info("Converting sample rate to 48000 Hz", slog.Int("From", int(decoder.SampleRate)))
+		slog.Debug("Converting sample rate to 48000 Hz", slog.Int("From", int(decoder.SampleRate)))
 	}
 
 	// Create the output WAV file

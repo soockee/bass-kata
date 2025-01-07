@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"log"
 	"log/slog"
 	"os"
 	"os/signal"
-	"runtime/pprof"
 	"sync"
 	"time"
 
@@ -32,21 +30,13 @@ func main() {
 	// Capture the start time
 	startTime := time.Now()
 
-	f, err := os.Create("cpu.prof")
-	if err != nil {
-		log.Fatal(err)
-	}
-	pprof.StartCPUProfile(f)
-
-	defer pprof.StopCPUProfile()
-
 	config := AppConfig{
-		InputFile:     "data-test/burning_alive.wav",
+		InputFile:     "data-test/piano2.wav",
 		TempFile:      "data-test/output.wav",
 		CaptureFile:   "data-test/captured_audio.wav",
 		CaptureDevice: "Analogue 1 + 2 (Focusrite USB Audio)",
-		// OutputDevice:  "Speakers (Focusrite USB Audio)",
-		OutputDevice: "Headphones (2- High Definition Audio Device)",
+		OutputDevice:  "Speakers (Focusrite USB Audio)",
+		// OutputDevice: "Headphones (2- High Definition Audio Device)",
 		// CaptureDevice: "Microphone (Yeti Stereo Microphone)",
 	}
 
@@ -62,37 +52,32 @@ func main() {
 
 	// Calculate and log the elapsed time
 	elapsedTime := time.Since(startTime)
-	slog.Info("All tasks completed. Exiting.", slog.String("duration", elapsedTime.String()))
-
-	memf, err := os.Create("mem.prof")
-	if err != nil {
-		log.Fatal(err)
-	}
-	pprof.WriteHeapProfile(memf)
+	slog.Debug("All tasks completed. Exiting.", slog.String("duration", elapsedTime.String()))
 
 }
 
 func runTasks(ctx context.Context, cancel context.CancelFunc, config AppConfig) {
 	audiostream := audio.NewAudioStream()
+	mux := audio.NewAudioMux(audiostream)
+
+	// Add subscribers
+	sub := mux.AddSubscriber()
 
 	tasks := []struct {
 		Name string
 		Task func(context.Context) error
 	}{
-		// {"Devices Monitoring", func(ctx context.Context) error {
-		// 	return devices.Devices(ctx)
+		{"Audio Capture File", func(ctx context.Context) error {
+			return capture.CaptureFile(mux, config.TempFile, ctx)
+		}},
+		// {"Audio Capture Device", func(ctx context.Context) error {
+		// 	return capture.CaptureDevice(mux, config.CaptureDevice, ctx)
 		// }},
-		{"Audio Rendering", func(ctx context.Context) error {
-			return render.Render(config.TempFile, config.OutputDevice, ctx)
-		}},
-		{"Audio Capture Stream", func(ctx context.Context) error {
-			return capture.CaptureWithStream(audiostream, config.CaptureDevice, ctx)
-		}},
 		// {"Audio Capture File", func(ctx context.Context) error {
-		// 	return capture.CaptureToFile(config.CaptureDevice, config.TempFile, ctx)
+		// 	return capture.CaptureDevice(mux, config.CaptureDevice, ctx)
 		// }},
 		{"Audio Rendering", func(ctx context.Context) error {
-			return render.RenderFromStream(audiostream, config.OutputDevice, ctx)
+			return render.RenderFromStream(sub, config.OutputDevice, ctx)
 		}},
 	}
 
@@ -106,33 +91,15 @@ func runTasks(ctx context.Context, cancel context.CancelFunc, config AppConfig) 
 				slog.Error("Task Event", slog.String("task", taskName), slog.Any("msg", err))
 				cancel()
 			} else {
-				slog.Info("Task completed successfully", slog.String("task", taskName))
+				slog.Debug("Task completed successfully", slog.String("task", taskName))
 			}
 		}(task.Name, task.Task)
 	}
 
+	// Wait for all workers to finish
 	wg.Wait()
 }
 
-// func writeToFileFromStream(stream **capture.AudioStream, filename string) error {
-// 	outputFile, err := os.Create(filename)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to create output file: %w", err)
-// 	}
-// 	defer outputFile.Close()
-
-// 	// Read and parse the `.wav` file
-// 	err = wave.WriteFrames(samples, waveFmt, filename)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to read file: %w", err)
-// 	}
-// 	slog.Debug("Audio capture successful", slog.String("file", filename))
-// // Read and parse the `.wav` file
-// 	err = wave.WriteFrames(samples, waveFmt, filename)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to read file: %w", err)
-// 	}
-// }
 
 func setupSignalHandling() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -154,6 +121,6 @@ func processWavFile(inputFile, tempFile string) error {
 	if err := audio.ConvertWav(inputFile, tempFile); err != nil {
 		return err
 	}
-	slog.Info("WAV file converted successfully", slog.String("file", tempFile))
+	slog.Debug("WAV file converted successfully", slog.String("file", tempFile))
 	return nil
 }

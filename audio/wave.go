@@ -17,6 +17,15 @@ func FramesToBytes(frames []wave.Frame) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+func FrameToBytes(frame wave.Frame) ([]byte, error) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.LittleEndian, frame)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 // parseRawData takes raw audio data and converts it to a slice of audio frames
 func TransfromRawData(wfmt wave.WaveFmt, rawdata []byte, channel channelSelect) []wave.Frame {
 	bytesSampleSize := wfmt.BitsPerSample / 8
