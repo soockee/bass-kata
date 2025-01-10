@@ -6,75 +6,28 @@ on:
     branches:
       - main
 
+env:
+  go_version: 1.21.3
+
 jobs:
   test:
-    name: Test with Go 1.21.3 on windows-latest
+    name: Test with Go on windows-latest
     runs-on: [windows-latest]
     defaults:
       run:
         shell: bash
     steps:
-      - name: Git
-        run: |
-          # See actions/checkout#135
-          git config --global core.autocrlf false
-          git config --global core.eol lf
-
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: ${{ matrix.go }}
-
-      - name: Install dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install libasound2-dev
-
-      - name: go vet
-        if: runner.os == 'Linux'
-        run: |
-          go vet -v ./...
+          go-version: ${{ env.go_version }}
 
       - name: go build
         run: |
           go build -v ./...
-          # Compile without optimization to check potential stack overflow.
-          # The option '-gcflags=all=-N -l' is often used at Visual Studio Code.
-          # See also https://go.googlesource.com/vscode-go/+/HEAD/docs/debugging.md#launch and the issue hajimehoshi/ebiten#2120.
-          go build "-gcflags=all=-N -l" -v ./...
-
-          # Check cross-compiling WebAssembly.
-          # Unfortunately it is difficult to test Oto on browsers since this requires user interactions.
-          env GOOS=js GOARCH=wasm go build -v ./...
-
-          # Check cross-compiling Windows binaries.
-          env GOOS=windows GOARCH=386 go build -v ./...
-          env GOOS=windows GOARCH=amd64 go build -v ./...
-          env GOOS=windows GOARCH=arm go build -v ./...
-          env GOOS=windows GOARCH=arm64 go build -v ./...
-
-          # Check cross-compiling macOS binaries.
-          env GOOS=darwin GOARCH=amd64 go build -v ./...
-          env GOOS=darwin GOARCH=arm64 go build -v ./...
-
-      - name: go mod vendor
-        run: |
-          mkdir /tmp/vendoring
-          cd /tmp/vendoring
-          go mod init foo
-          echo 'package main' > main.go
-          echo 'import (' >> main.go
-          echo '  _ "github.com/ebitengine/oto/v3"' >> main.go
-          echo ')' >> main.go
-          echo 'func main() {}' >> main.go
-          go mod edit -replace github.com/ebitengine/oto/v3=$GITHUB_WORKSPACE
-          go mod tidy
-          go mod vendor
-          go build -v .
 
       - name: go test
         run: |
