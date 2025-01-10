@@ -12,6 +12,20 @@ import (
 	"github.com/moutend/go-wca/pkg/wca"
 )
 
+func GetFormat(deviceName string) (wca.WAVEFORMATEX, error) {
+	var wfx *wca.WAVEFORMATEX
+
+	ac, err := SetupAudioClient(deviceName)
+	ac.Release()
+	if err != nil {
+		return *wfx, fmt.Errorf("failed to setup audio client: %w", err)
+	}
+
+	err = ac.GetMixFormat(&wfx)
+	defer ole.CoTaskMemFree(uintptr(unsafe.Pointer(wfx)))
+	return *wfx, err
+}
+
 // Capture captures audio and exposes it as a stream
 func Capture(stream *AudioStream, deviceName string, ctx context.Context) error {
 	ac, err := SetupAudioClient(deviceName)
@@ -92,6 +106,7 @@ func captureloop(stream *AudioStream, acc *wca.IAudioCaptureClient, latency time
 			start := unsafe.Pointer(data)
 			lim := int(framesToRead) * int(blockAlign)
 			buf := make([]byte, lim)
+
 			for n := 0; n < lim; n++ {
 				buf[n] = *(*byte)(unsafe.Pointer(uintptr(start) + uintptr(n)))
 			}
