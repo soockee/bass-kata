@@ -1,7 +1,7 @@
 # go-record
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/yourusername/go-record.svg)](https://pkg.go.dev/github.com/yourusername/go-record)
-[![Build Status](https://github.com/yourusername/go-record/actions/workflows/test.yml/badge.svg)](https://github.com/yourusername/go-record/actions?query=workflow%3Atest)
+[![Go Reference](https://pkg.go.dev/badge/github.com/soockee/go-record.svg)](https://pkg.go.dev/github.com/yourusername/go-record)
+[![Build Status](https://github.com/soockee/go-record/actions/workflows/test.yml/badge.svg)](https://github.com/soockee/go-record/actions?query=workflow%3Atest)
 
 A library to capture and render audio using WASAPI.
 
@@ -48,7 +48,7 @@ import (
     "context"
     "log"
 
-    "github.com/yourusername/go-record"
+    "github.com/soockee/go-record"
 )
 
 func main() {
@@ -72,7 +72,7 @@ import (
     "context"
     "log"
 
-    "github.com/yourusername/go-record"
+    "github.com/soockee/go-record"
 )
 
 func main() {
@@ -96,7 +96,7 @@ import (
     "fmt"
 
     "github.com/moutend/go-wca/pkg/wca"
-    "github.com/yourusername/go-record"
+    "github.com/soockee/go-record"
 )
 
 func main() {
@@ -120,7 +120,7 @@ import (
     "log"
 
     "github.com/moutend/go-wca/pkg/wca"
-    "github.com/yourusername/go-record"
+    "github.com/soockee/go-record"
 )
 
 func main() {
