@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+
+	"github.com/soockee/go-record"
 )
 
 type AppConfig struct {
@@ -18,7 +20,7 @@ type AppConfig struct {
 
 func main() {
 	h := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: slog.LevelInfo,
 	})
 	slog.SetDefault(slog.New(h))
 
@@ -37,17 +39,17 @@ func main() {
 }
 
 func runTasks(ctx context.Context, cancel context.CancelFunc, config AppConfig) {
-	audiostream := NewAudioStream()
+	audiostream := record.NewAudioStream()
 
 	tasks := []struct {
 		Name string
 		Task func(context.Context) error
 	}{
 		{"Audio Capture Stream", func(ctx context.Context) error {
-			return Capture(audiostream, config.CaptureDevice, ctx)
+			return record.Capture(audiostream, config.CaptureDevice, ctx)
 		}},
 		{"Audio Rendering", func(ctx context.Context) error {
-			return Render(audiostream, config.OutputDevice, ctx)
+			return record.Render(audiostream, config.OutputDevice, ctx)
 		}},
 	}
 
